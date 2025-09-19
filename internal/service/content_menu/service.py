@@ -195,7 +195,7 @@ class ContentMenuDialogService(interface.IContentMenuDialogService):
             try:
                 # Запускаем диалог черновиков публикаций
                 await dialog_manager.start(
-                    model.PublicationDraftContentStates.drafts_list,
+                    model.PublicationDraftStates.publication_list,
                     mode=StartMode.RESET_STACK
                 )
 

@@ -31,6 +31,7 @@ from internal.controller.tg.dialog.generate_publication.dialog import GeneratePu
 from internal.controller.tg.dialog.generate_video_cut.dialog import GenerateVideoCutDialog
 from internal.controller.tg.dialog.moderation_publication.dialog import ModerationPublicationDialog
 from internal.controller.tg.dialog.video_cut_draft_content.dialog import VideoCutsDraftDialog
+from internal.controller.tg.dialog.publication_draft_content.dialog import PublicationDraftDialog
 
 from internal.service.state.service import StateService
 from internal.service.auth.service import AuthDialogService
@@ -44,6 +45,7 @@ from internal.service.generate_publication.service import GeneratePublicationDia
 from internal.service.generate_video_cut.service import GenerateVideoCutDialogService
 from internal.service.moderation_publication.service import ModerationPublicationDialogService
 from internal.service.video_cut_draft_content.service import VideoCutsDraftDialogService
+from internal.service.publication_draft_content.service import PublicationDraftDialogService
 
 from internal.repo.state.repo import StateRepo
 
@@ -190,6 +192,14 @@ video_cuts_draft_service = VideoCutsDraftDialogService(
     kontur_content_client,
 )
 
+publication_draft_service = PublicationDraftDialogService(
+    tel,
+    state_repo,
+    kontur_employee_client,
+    kontur_organization_client,
+    kontur_content_client,
+)
+
 auth_dialog = AuthDialog(
     tel,
     auth_dialog_service,
@@ -236,9 +246,14 @@ moderation_publication_dialog = ModerationPublicationDialog(
     moderation_publication_service
 )
 
-video_cuts_draft_dialog= VideoCutsDraftDialog(
+video_cuts_draft_dialog = VideoCutsDraftDialog(
     tel,
     video_cuts_draft_service
+)
+
+publication_draft_dialog = PublicationDraftDialog(
+    tel,
+    publication_draft_service
 )
 
 # Инициализация middleware
@@ -282,6 +297,7 @@ if __name__ == "__main__":
         generate_video_cut_dialog,
         moderation_publication_dialog,
         video_cuts_draft_dialog,
+        publication_draft_dialog,
         cfg.prefix,
     )
     uvicorn.run(app, host="0.0.0.0", port=int(cfg.http_port), access_log=False)

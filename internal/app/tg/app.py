@@ -25,6 +25,7 @@ def NewTg(
         generate_video_cut_dialog: interface.IGenerateVideoCutDialog,
         moderation_publication_dialog: interface.IModerationPublicationDialog,
         video_cuts_draft_dialog: interface.IVideoCutsDraftDialog,
+        publication_draft_dialog: interface.IPublicationDraftDialog,
         prefix: str
 ):
     app = FastAPI(
@@ -53,7 +54,8 @@ def NewTg(
         generate_publication_dialog,
         generate_video_cut_dialog,
         moderation_publication_dialog,
-        video_cuts_draft_dialog
+        video_cuts_draft_dialog,
+        publication_draft_dialog
     )
     dp.errors.register(
         tg_middleware.on_critical_error,
@@ -146,7 +148,8 @@ def include_dialogs(
         generate_publication_dialog.get_dialog(),
         moderation_publication_dialog.get_dialog(),
         generate_video_cut_dialog.get_dialog(),
-        video_cuts_draft_dialog.get_dialog()
+        video_cuts_draft_dialog.get_dialog(),
+        publication_draft_dialog.get_dialog()
     )
 
     dp.include_routers(dialog_router)
