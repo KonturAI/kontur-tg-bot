@@ -397,6 +397,9 @@ class PublicationDraftDialog(interface.IPublicationDraftDialog):
             parse_mode="HTML",
         )
 
+
+
+
     def get_edit_image_menu_window(self) -> Window:
         """
         🖼️ УПРАВЛЕНИЕ ИЗОБРАЖЕНИЕМ
