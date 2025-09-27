@@ -134,9 +134,9 @@ jobs:
                     CURRENT_REF=$(git symbolic-ref --short HEAD 2>/dev/null || git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD)
                     log_message "🔍 Текущее состояние: $CURRENT_REF"
                     
-                    if git tag -l | grep -q "^${{ env.TAG_NAME }}$"; then
-                        log_message "🏷️ Локальный тег ${{ env.TAG_NAME }} уже существует, удаляем для обновления"
-                        git tag -d ${{ env.TAG_NAME }} 2>&1 | tee -a "$LOG_FILE"
+                    if git tag -l | grep -q "^${{ env.RELEASE_VERSION }}$"; then
+                        log_message "🏷️ Локальный тег ${{ env.RELEASE_VERSION }} уже существует, удаляем для обновления"
+                        git tag -d ${{ env.RELEASE_VERSION }} 2>&1 | tee -a "$LOG_FILE"
                     fi
                     
                     log_message "📥 Получаем обновления из удаленного репозитория"
@@ -146,18 +146,18 @@ jobs:
                     git fetch origin --tags --force 2>&1 | tee -a "$LOG_FILE"
                     
                     # Проверяем, что тег теперь доступен
-                    if ! git tag -l | grep -q "^${{ env.TAG_NAME }}$"; then
-                        log_message "❌ Тег ${{ env.TAG_NAME }} не найден в репозитории после обновления!"
+                    if ! git tag -l | grep -q "^${{ env.RELEASE_VERSION }}$"; then
+                        log_message "❌ Тег ${{ env.RELEASE_VERSION }} не найден в репозитории после обновления!"
                         log_message "📋 Доступные теги:"
                         git tag -l | tail -10 | tee -a "$LOG_FILE"
                         exit 1
                     fi
                     
-                    log_message "✅ Тег ${{ env.TAG_NAME }} найден и готов к использованию"
+                    log_message "✅ Тег ${{ env.RELEASE_VERSION }} найден и готов к использованию"
 
                     # Переключаемся на тег
-                    log_message "🏷️ Переключаемся на тег ${{ env.TAG_NAME }}"
-                    git checkout ${{ env.TAG_NAME }} 2>&1 | tee -a "$LOG_FILE"
+                    log_message "🏷️ Переключаемся на тег ${{ env.RELEASE_VERSION }}"
+                    git checkout ${{ env.RELEASE_VERSION }} 2>&1 | tee -a "$LOG_FILE"
                     
                     # Очищаем старые ветки (кроме main/master)
                     log_message "🧹 Очищаем старые ветки"
