@@ -111,6 +111,7 @@ jobs:
                         curl -s -X PATCH \
                       -H "Content-Type: application/json" \
                       -d '{
+                        "release_id": ${{ env.SERVICE_NAME }},
                         "status": "failed"
                       }' \
                       "${{ env.LOOM_RELEASE_TG_BOT_API_URL }}/release"
@@ -211,6 +212,7 @@ jobs:
                     curl -s -X PATCH \
                       -H "Content-Type: application/json" \
                       -d '{
+                        "release_id": ${{ env.SERVICE_NAME }},
                         "status": "manual_testing"
                       }' \
                       "${{ env.LOOM_RELEASE_TG_BOT_API_URL }}/release"
