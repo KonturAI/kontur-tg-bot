@@ -98,8 +98,7 @@ jobs:
                     curl -s -X PATCH \
                       -H "Content-Type: application/json" \
                       -d '{
-                        "status": "initiated",
-                        "interserver_secret_key": "${{ env.LOOM_INTERSERVER_SECRET_KEY }}",
+                        "status": "building"
                       }' \
                       "${{ env.LOOM_RELEASE_TG_BOT_API_URL }}/release"
                     echo "✅ Статус обновлен на 'building'"
@@ -112,8 +111,7 @@ jobs:
                         curl -s -X PATCH \
                       -H "Content-Type: application/json" \
                       -d '{
-                        "status": "failed",
-                        "interserver_secret_key": "${{ env.LOOM_INTERSERVER_SECRET_KEY }}",
+                        "status": "failed"
                       }' \
                       "${{ env.LOOM_RELEASE_TG_BOT_API_URL }}/release"
                     }
@@ -213,8 +211,7 @@ jobs:
                     ccurl -s -X PATCH \
                       -H "Content-Type: application/json" \
                       -d '{
-                        "status": "manual_testing",
-                        "interserver_secret_key": "${{ env.LOOM_INTERSERVER_SECRET_KEY }}",
+                        "status": "manual_testing"
                       }' \
                       "${{ env.LOOM_RELEASE_TG_BOT_API_URL }}/release"
                     echo "✅ Статус обновлен на 'manual_testing'"
