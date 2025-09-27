@@ -108,41 +108,58 @@ jobs:
                 id: deploy_step
                 run: |
                     # Используем sshpass для аутентификации по паролю
-                    sshpass -p "${{ env.SERVER_PASSWORD }}" ssh -o StrictHostKeyChecking=no root@${{ env.SERVER_HOST }} -p 22 << 'EOF' 2>&1
+                    SSH_OUTPUT=$(sshpass -p "${{ env.SERVER_PASSWORD }}" ssh -o StrictHostKeyChecking=no root@${{ env.SERVER_HOST }} -p 22 << 'EOF' 2>&1
                     set -e
 
+                    # Создаем директорию для логов если её нет
+                    mkdir -p /var/log/deployments
+                    
+                    # Создаем файл лога с именем тега
+                    LOG_FILE="/var/log/deployments/${{ env.TAG_NAME }}.log"
+                    
+                    # Функция для логирования
+                    log_message() {
+                        local message="$1"
+                        echo "$(date '+%Y-%m-%d %H:%M:%S') - $message" | tee -a "$LOG_FILE"
+                    }
+                    
+                    log_message "🚀 Начинаем деплой тега ${{ env.TAG_NAME }}"
+
                     cd loom/${{ env.SERVICE_NAME }}
-                    git fetch origin --tags
+                    
+                    log_message "📥 Обновляем теги из репозитория"
+                    git fetch origin --tags 2>&1 | tee -a "$LOG_FILE"
 
                     # Сохраняем текущую ветку/тег для проверки
                     CURRENT_REF=$(git symbolic-ref --short HEAD 2>/dev/null || git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD)
-                    echo "🔍 Текущее состояние: $CURRENT_REF"
+                    log_message "🔍 Текущее состояние: $CURRENT_REF"
 
                     # Проверяем, существует ли тег
                     if ! git tag -l | grep -q "^${{ env.TAG_NAME }}$"; then
-                        echo "❌ Тег ${{ env.TAG_NAME }} не найден в репозитории!"
+                        log_message "❌ Тег ${{ env.TAG_NAME }} не найден в репозитории!"
                         exit 1
                     fi
 
                     # Переключаемся на тег
-                    echo "🏷️ Переключаемся на тег ${{ env.TAG_NAME }}"
-                    git checkout ${{ env.TAG_NAME }}
+                    log_message "🏷️ Переключаемся на тег ${{ env.TAG_NAME }}"
+                    git checkout ${{ env.TAG_NAME }} 2>&1 | tee -a "$LOG_FILE"
 
                     # Очищаем старые ветки (кроме main/master)
-                    echo "🧹 Очищаем старые ветки"
-                    git for-each-ref --format='%(refname:short)' refs/heads | grep -v -E "^(main|master)$" | xargs -r git branch -D
+                    log_message "🧹 Очищаем старые ветки"
+                    git for-each-ref --format='%(refname:short)' refs/heads | grep -v -E "^(main|master)$" | xargs -r git branch -D 2>&1 | tee -a "$LOG_FILE"
 
                     # Очищаем удаленные ветки
-                    git remote prune origin
+                    log_message "🧹 Очищаем удаленные ветки"
+                    git remote prune origin 2>&1 | tee -a "$LOG_FILE"
 
-                    echo "✅ Переключение на тег ${{ env.TAG_NAME }} завершено"
+                    log_message "✅ Переключение на тег ${{ env.TAG_NAME }} завершено"
 
                     cd ../loom-system
 
                     export $(cat env/.env.app env/.env.db env/.env.monitoring | xargs)
 
-                    echo "🔨 Начинаем сборку контейнера для тега ${{ env.TAG_NAME }}..."
-                    docker compose -f ./docker-compose/app.yaml up -d --build ${{ env.SERVICE_NAME }}
+                    log_message "🔨 Начинаем сборку контейнера для тега ${{ env.TAG_NAME }}..."
+                    docker compose -f ./docker-compose/app.yaml up -d --build ${{ env.SERVICE_NAME }} 2>&1 | tee -a "$LOG_FILE"
 
                     check_health() {
                         # Если есть HTTP endpoint
@@ -157,17 +174,18 @@ jobs:
                     ATTEMPT=1
                     SUCCESS=false
 
+                    log_message "⏳ Ожидание запуска сервиса..."
                     sleep 10
 
                     while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
-                        echo "🔍 Проверка health (попытка $ATTEMPT из $MAX_ATTEMPTS)..."
+                        log_message "🔍 Проверка health (попытка $ATTEMPT из $MAX_ATTEMPTS)..."
 
                         if check_health; then
-                            echo "✅ Health check пройден!"
+                            log_message "✅ Health check пройден!"
                             SUCCESS=true
                             break
                         else
-                            echo "⏳ Health check не пройден, ждем..."
+                            log_message "⏳ Health check не пройден, ждем..."
                             sleep 15
                         fi
 
@@ -175,23 +193,28 @@ jobs:
                     done
 
                     if [ "$SUCCESS" = false ]; then
-                        echo "❌ Health check не пройден после $MAX_ATTEMPTS попыток"
-                        echo "📋 Логи контейнера:"
-                        docker logs --tail 50 ${{ env.SERVICE_NAME }}
+                        log_message "❌ Health check не пройден после $MAX_ATTEMPTS попыток"
+                        log_message "📋 Логи контейнера:"
+                        docker logs --tail 50 ${{ env.SERVICE_NAME }} 2>&1 | tee -a "$LOG_FILE"
                         exit 1
                     fi
 
-                    echo "✅ Тег ${{ env.TAG_NAME }} успешно развернут и приложение работает!"
-                    EOF
+                    log_message "✅ Тег ${{ env.TAG_NAME }} успешно развернут и приложение работает!"
+                    log_message "📁 Лог деплоя сохранен в: $LOG_FILE"
                     
+                    # Выводим последние строки лога для GitHub Actions
+                    echo "📋 Последние строки лога деплоя:"
+                    tail -20 "$LOG_FILE"
+                    EOF
+                    )
 
-#                    SSH_EXIT_CODE=$?
-#
-#                    if [ $SSH_EXIT_CODE -ne 0 ]; then
-#                        echo "❌ Ошибка при деплое на тестовый сервер:"
-#                        echo "$SSH_OUTPUT"
-#                        exit 1
-#                    fi
+                    SSH_EXIT_CODE=$?
+                    
+                    if [ $SSH_EXIT_CODE -ne 0 ]; then
+                        echo "❌ Ошибка при деплое на тестовый сервер:"
+                        echo "$SSH_OUTPUT"
+                        exit 1
+                    fi
                     
                     echo "✅ Деплой завершен успешно"
 
@@ -226,6 +249,7 @@ jobs:
                     echo "📊 Сервер: ${{ env.SERVER_HOST }}"
                     echo "🏷️ Версия: ${{ env.TAG_NAME }}"
                     echo "🧪 Статус: Готов к ручному тестированию"
+                    echo "📁 Лог деплоя: /var/log/deployments/${{ env.TAG_NAME }}.log"
 
             -   name: Handle deployment failure
                 if: failure()
@@ -234,3 +258,4 @@ jobs:
                     echo "📊 Сервер: ${{ env.SERVER_HOST }}"
                     echo "🏷️ Версия: ${{ env.TAG_NAME }}"
                     echo "📋 Проверьте логи выше для подробной информации"
+                    echo "📁 Лог деплоя: /var/log/deployments/${{ env.TAG_NAME }}.log"
