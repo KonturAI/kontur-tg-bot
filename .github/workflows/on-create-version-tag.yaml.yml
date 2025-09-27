@@ -107,19 +107,8 @@ jobs:
             -   name: Update tag on test server
                 id: deploy_step
                 run: |
-                    # Функция для обновления статуса с ошибкой
-                    update_failed_status() {
-                        curl -s -X PATCH \
-                      -H "Content-Type: application/json" \
-                      -d '{
-                        "release_id": ${{ env.RELEASE_ID }},
-                        "status": "failed"
-                      }' \
-                      "${{ env.LOOM_RELEASE_TG_BOT_API_URL }}/release"
-                    }
-
                     # Используем sshpass для аутентификации по паролю
-                    SSH_OUTPUT=$(sshpass -p "${{ env.SERVER_PASSWORD }}" ssh -o StrictHostKeyChecking=no root@${{ env.SERVER_HOST }} -p 22 << 'EOF' 2>&1
+                    sshpass -p "${{ env.SERVER_PASSWORD }}" ssh -o StrictHostKeyChecking=no root@${{ env.SERVER_HOST }} -p 22 << 'EOF' 2>&1
                     set -e
 
                     cd loom/${{ env.SERVICE_NAME }}
@@ -194,18 +183,29 @@ jobs:
 
                     echo "✅ Тег ${{ env.TAG_NAME }} успешно развернут и приложение работает!"
                     EOF
-                    )
-
-                    SSH_EXIT_CODE=$?
                     
-                    if [ $SSH_EXIT_CODE -ne 0 ]; then
-                        echo "❌ Ошибка при деплое на тестовый сервер:"
-                        echo "$SSH_OUTPUT"
-                        update_failed_status
-                        exit 1
-                    fi
+
+#                    SSH_EXIT_CODE=$?
+#
+#                    if [ $SSH_EXIT_CODE -ne 0 ]; then
+#                        echo "❌ Ошибка при деплое на тестовый сервер:"
+#                        echo "$SSH_OUTPUT"
+#                        exit 1
+#                    fi
                     
                     echo "✅ Деплой завершен успешно"
+
+            - name: Update status on failure
+              if: failure() && steps.deploy_step.outcome == 'failure'
+              run: |
+                curl -s -X PATCH \
+                  -H "Content-Type: application/json" \
+                  -d '{
+                    "release_id": ${{ env.RELEASE_ID }},
+                    "status": "failed"
+                  }' \
+                  "${{ env.LOOM_RELEASE_TG_BOT_API_URL }}/release"
+                echo "✅ Статус обновлен на 'failed'"
 
             -   name: Update status to manual testing
                 if: success()
