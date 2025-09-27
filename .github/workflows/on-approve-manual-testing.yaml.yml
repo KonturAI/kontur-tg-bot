@@ -242,10 +242,10 @@ jobs:
                       -H "Content-Type: application/json" \
                       -d '{
                         "release_id": ${{ env.RELEASE_ID }},
-                        "status": "failed"
+                        "status": "production_failed"
                       }' \
                       "${{ env.LOOM_RELEASE_TG_BOT_API_URL }}/release"
-                    echo "✅ Статус обновлен на 'failed'"
+                    echo "✅ Статус обновлен на 'production_failed'"
 
             -   name: Update status to production success
                 if: success()
