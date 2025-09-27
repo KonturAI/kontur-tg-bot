@@ -1,0 +1,250 @@
+name: Deploy tag to production server
+
+on:
+    workflow_dispatch:
+        inputs:
+            tag_name:
+                description: 'Tag to deploy (e.g., v1.0.0)'
+                required: true
+                type: string
+            release_id:
+                description: 'Release ID from database'
+                required: true
+                type: string
+
+env:
+    SERVICE_NAME: loom-tg-bot
+
+jobs:
+    deploy-to-production:
+        runs-on: self-hosted
+
+        steps:
+            -   name: Validate inputs
+                run: |
+                    if [[ ! "${{ github.event.inputs.tag_name }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
+                      echo "❌ Неверный формат тега: ${{ github.event.inputs.tag_name }}"
+                      echo "   Ожидается формат: v1.0.0"
+                      exit 1
+                    fi
+                    
+                    if [[ ! "${{ github.event.inputs.release_id }}" =~ ^[0-9]+$ ]]; then
+                      echo "❌ Неверный формат release_id: ${{ github.event.inputs.release_id }}"
+                      echo "   Ожидается числовое значение"
+                      exit 1
+                    fi
+                    
+                    echo "TAG_NAME=${{ github.event.inputs.tag_name }}" >> $GITHUB_ENV
+                    echo "RELEASE_ID=${{ github.event.inputs.release_id }}" >> $GITHUB_ENV
+                    echo "✅ Входные параметры валидны"
+                    echo "✅ Тег: ${{ github.event.inputs.tag_name }}"
+                    echo "✅ Release ID: ${{ github.event.inputs.release_id }}"
+
+            -   name: Load server configuration
+                run: |
+                    if [ ! -f "/root/.env.servers" ]; then
+                      echo "❌ Файл конфигурации серверов .env.servers не найден!"
+                      exit 1
+                    fi
+                    
+                    # Загружаем переменные окружения из .env.servers
+                    set -a
+                    source /root/.env.servers
+                    set +a
+                    
+                    # Проверяем наличие API конфигурации
+                    if [ -z "$LOOM_RELEASE_TG_BOT_API_URL" ] || [ -z "$LOOM_INTERSERVER_SECRET_KEY" ]; then
+                      echo "❌ API конфигурация не найдена в .env.servers!"
+                      echo "   Убедитесь, что есть переменные: LOOM_RELEASE_TG_BOT_API_URL и LOOM_INTERSERVER_SECRET_KEY"
+                      exit 1
+                    fi
+                    
+                    # Формируем имена переменных для продакшн сервера
+                    HOST_VAR="PROD_HOST"
+                    PASSWORD_VAR="PROD_PASSWORD"
+                    
+                    # Получаем значения переменных
+                    eval "SERVER_HOST=\$$HOST_VAR"
+                    eval "SERVER_PASSWORD=\$$PASSWORD_VAR"
+                    
+                    if [ -z "$SERVER_HOST" ] || [ -z "$SERVER_PASSWORD" ]; then
+                      echo "❌ Конфигурация prod сервера не найдена!"
+                      echo "   Убедитесь, что в .env.servers есть переменные: ${HOST_VAR} и ${PASSWORD_VAR}"
+                      exit 1
+                    fi
+                    
+                    # Экспортируем все необходимые переменные
+                    echo "LOOM_RELEASE_TG_BOT_API_URL=$LOOM_RELEASE_TG_BOT_API_URL" >> $GITHUB_ENV
+                    echo "LOOM_INTERSERVER_SECRET_KEY=$LOOM_INTERSERVER_SECRET_KEY" >> $GITHUB_ENV
+                    echo "SERVER_HOST=$SERVER_HOST" >> $GITHUB_ENV
+                    echo "SERVER_PASSWORD=$SERVER_PASSWORD" >> $GITHUB_ENV
+                    echo "✅ Конфигурация загружена успешно"
+                    echo "✅ API URL: $LOOM_RELEASE_TG_BOT_API_URL"
+                    echo "✅ Prod сервер: $SERVER_HOST"
+
+            -   name: Update status to production deployment
+                run: |
+                    RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \
+                      -H "Content-Type: application/json" \
+                      -d '{
+                        "release_id": ${{ env.RELEASE_ID }},
+                        "status": "deploying",
+                        "github_run_id": "${{ github.run_id }}",
+                        "github_action_link": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                      }' \
+                      "${{ env.LOOM_RELEASE_TG_BOT_API_URL }}/release")
+                    
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    BODY=$(echo "$RESPONSE" | head -n -1)
+                    
+                    if [ "$HTTP_CODE" -ne 200 ]; then
+                      echo "❌ Не удалось обновить статус релиза. HTTP код: $HTTP_CODE"
+                      echo "Ответ: $BODY"
+                      exit 1
+                    fi
+                    
+                    echo "✅ Статус обновлен на 'production_deployment'"
+
+            -   name: Deploy to production server
+                id: deploy_step
+                run: |
+                    # Функция для обновления статуса с ошибкой
+                    update_failed_status() {
+                        curl -s -X PATCH \
+                          -H "Content-Type: application/json" \
+                          -d '{
+                            "release_id": ${{ env.RELEASE_ID }},
+                            "status": "failed"
+                          }' \
+                          "${{ env.LOOM_RELEASE_TG_BOT_API_URL }}/release"
+                    }
+                    
+                    # Используем sshpass для аутентификации по паролю
+                    SSH_OUTPUT=$(sshpass -p "${{ env.SERVER_PASSWORD }}" ssh -o StrictHostKeyChecking=no root@${{ env.SERVER_HOST }} -p 22 << 'EOF' 2>&1
+                    set -e
+                    
+                    cd loom/${{ env.SERVICE_NAME }}
+                    git fetch origin --tags
+                    
+                    # Сохраняем текущую ветку/тег для проверки
+                    CURRENT_REF=$(git symbolic-ref --short HEAD 2>/dev/null || git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD)
+                    echo "🔍 Текущее состояние: $CURRENT_REF"
+                    
+                    # Проверяем, существует ли тег
+                    if ! git tag -l | grep -q "^${{ env.TAG_NAME }}$"; then
+                        echo "❌ Тег ${{ env.TAG_NAME }} не найден в репозитории!"
+                        exit 1
+                    fi
+                    
+                    # Создаем бэкап текущего состояния
+                    BACKUP_REF="backup-before-${{ env.TAG_NAME }}-$(date +%Y%m%d-%H%M%S)"
+                    git tag "$BACKUP_REF" HEAD
+                    echo "💾 Создан бэкап: $BACKUP_REF"
+                    
+                    # Переключаемся на тег
+                    echo "🏷️ Переключаемся на тег ${{ env.TAG_NAME }}"
+                    git checkout ${{ env.TAG_NAME }}
+                    
+                    # Очищаем старые ветки (кроме main/master)
+                    echo "🧹 Очищаем старые ветки"
+                    git for-each-ref --format='%(refname:short)' refs/heads | grep -v -E "^(main|master)$" | xargs -r git branch -D
+                    
+                    # Очищаем удаленные ветки
+                    git remote prune origin
+                    
+                    echo "✅ Переключение на тег ${{ env.TAG_NAME }} завершено"
+                    
+                    cd ../loom-system
+                    
+                    export $(cat env/.env.app env/.env.db env/.env.monitoring | xargs)
+                    
+                    echo "🔨 Начинаем сборку контейнера для тега ${{ env.TAG_NAME }} на ПРОДАКШН..."
+                    
+                    # Останавливаем старый контейнер
+                    echo "⏹️ Останавливаем старый контейнер..."
+                    docker compose -f ./docker-compose/app.yaml stop ${{ env.SERVICE_NAME }} || true
+                    
+                    # Создаем бэкап образа
+                    OLD_IMAGE=$(docker images --format "table {{.Repository}}:{{.Tag}}" | grep ${{ env.SERVICE_NAME }} | head -1 | tr -s ' ')
+                    if [ ! -z "$OLD_IMAGE" ]; then
+                        BACKUP_IMAGE="${{ env.SERVICE_NAME }}:backup-$(date +%Y%m%d-%H%M%S)"
+                        docker tag "$OLD_IMAGE" "$BACKUP_IMAGE"
+                        echo "💾 Создан бэкап образа: $BACKUP_IMAGE"
+                    fi
+                    
+                    # Собираем и запускаем новый контейнер
+                    docker compose -f ./docker-compose/app.yaml up -d --build ${{ env.SERVICE_NAME }}
+                    
+                    check_health() {
+                        # Если есть HTTP endpoint
+                        if curl -f -s -o /dev/null -w "%{http_code}" http://localhost:8005/api/tg-bot/health | grep -q "200"; then
+                            return 0
+                        else
+                            return 1
+                        fi
+                    }
+                    
+                    MAX_ATTEMPTS=5
+                    ATTEMPT=1
+                    SUCCESS=false
+                    
+                    echo "⏳ Ждем запуска сервиса..."
+                    sleep 15
+                    
+                    while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+                        echo "🔍 Проверка health (попытка $ATTEMPT из $MAX_ATTEMPTS)..."
+                    
+                        if check_health; then
+                            echo "✅ Health check пройден!"
+                            SUCCESS=true
+                            break
+                        else
+                            echo "⏳ Health check не пройден, ждем..."
+                            sleep 20
+                        fi
+                    
+                        ATTEMPT=$((ATTEMPT + 1))
+                    done
+                    
+                    if [ "$SUCCESS" = false ]; then
+                        echo "❌ Health check не пройден после $MAX_ATTEMPTS попыток"
+                        echo "📋 Логи контейнера:"
+                        docker logs --tail 100 ${{ env.SERVICE_NAME }}
+                        exit 1
+                    fi
+                    
+                    echo "🎉 Тег ${{ env.TAG_NAME }} успешно развернут на ПРОДАКШН и приложение работает!"
+                    EOF
+                    )
+                    
+                    SSH_EXIT_CODE=$?
+                    
+                    if [ $SSH_EXIT_CODE -ne 0 ]; then
+                        echo "❌ Ошибка при деплое на продакшн сервер:"
+                        echo "$SSH_OUTPUT"
+                        update_failed_status
+                        exit 1
+                    fi
+                    
+                    echo "✅ Деплой на продакшн завершен успешно"
+
+            -   name: Update status to production success
+                if: success()
+                run: |
+                    curl -s -X PATCH \
+                      -H "Content-Type: application/json" \
+                      -d '{
+                        "release_id": ${{ env.RELEASE_ID }},
+                        "status": "deployed",
+                      }' \
+                      "${{ env.LOOM_RELEASE_TG_BOT_API_URL }}/release"
+                    echo "✅ Статус обновлен на 'production_success'"
+
+            -   name: Verify production deployment
+                if: success()
+                run: |
+                    echo "🎉🎉🎉 ПРОДАКШН ДЕПЛОЙ ЗАВЕРШЕН УСПЕШНО 🎉🎉🎉"
+                    echo "📊 Сервер: ${{ env.SERVER_HOST }}"
+                    echo "🏷️ Версия: ${{ env.TAG_NAME }}"
+                    echo "✅ Статус: Успешно развернуто на продакшн"
+                    echo "🔗 Release ID: ${{ env.RELEASE_ID }}"
