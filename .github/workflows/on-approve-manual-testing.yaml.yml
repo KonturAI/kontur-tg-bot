@@ -235,7 +235,7 @@ jobs:
                       -H "Content-Type: application/json" \
                       -d '{
                         "release_id": ${{ env.RELEASE_ID }},
-                        "status": "deployed",
+                        "status": "deployed"
                       }' \
                       "${{ env.LOOM_RELEASE_TG_BOT_API_URL }}/release"
                     echo "✅ Статус обновлен на 'production_success'"
