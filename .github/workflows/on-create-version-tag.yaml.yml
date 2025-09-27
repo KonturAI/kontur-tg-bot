@@ -89,7 +89,7 @@ jobs:
                     fi
                     
                     # Извлекаем ID релиза из ответа
-                    RELEASE_ID=$(echo "$BODY" | grep -o '"id":[0-9]*' | sed 's/"id"://')
+                    RELEASE_ID=$(echo "$BODY" | grep -o '"release_id":[0-9]*' | sed 's/"release_id"://')
                     echo "RELEASE_ID=$RELEASE_ID" >> $GITHUB_ENV
                     echo "✅ Создана запись о релизе с ID: $RELEASE_ID"
 
