@@ -76,7 +76,6 @@ jobs:
                         "github_run_id": "${{ github.run_id }}",
                         "github_action_link": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
                         "github_ref": "${{ github.ref }}",
-                        "interserver_secret_key": "${{ env.LOOM_INTERSERVER_SECRET_KEY }}",
                       }' \
                       "${{ env.LOOM_RELEASE_TG_BOT_API_URL }}/release")
                     
