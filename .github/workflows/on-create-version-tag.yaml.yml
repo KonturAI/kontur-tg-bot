@@ -67,17 +67,18 @@ jobs:
                 run: |
                     # Создаем запись о релизе в базе данных
                     RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-                      -H "Content-Type: application/json" \
-                      -d '{
-                        "service_name": "${{ env.SERVICE_NAME }}",
-                        "release_version": "${{ env.TAG_NAME }}",
-                        "status": "initiated",
-                        "initiated_by": "${{ github.actor }}",
-                        "github_run_id": "${{ github.run_id }}",
-                        "github_action_link": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
-                        "github_ref": "${{ github.ref }}",
-                      }' \
-                      "${{ env.LOOM_RELEASE_TG_BOT_API_URL }}/release")
+                          -H "Content-Type: application/json" \
+                          -H "Authorization: Bearer ${{ env.LOOM_INTERSERVER_SECRET_KEY }}" \
+                          -d '{
+                            "service_name": "${{ env.SERVICE_NAME }}",
+                            "release_version": "${{ env.TAG_NAME }}",
+                            "status": "initiated",
+                            "initiated_by": "${{ github.actor }}",
+                            "github_run_id": "${{ github.run_id }}",
+                            "github_action_link": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+                            "github_ref": "${{ github.ref }}"
+                          }' \
+                          "${{ env.LOOM_RELEASE_TG_BOT_API_URL }}/release")
                     
                     HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
                     BODY=$(echo "$RESPONSE" | head -n -1)
