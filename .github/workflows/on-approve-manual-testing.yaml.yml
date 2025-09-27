@@ -112,10 +112,10 @@ jobs:
                     set -e
                     
                     # Создаем директорию для логов если её нет
-                    mkdir -p /var/log/deployments/production
+                    mkdir -p /var/log/deployments/production/${{ env.SERVICE_NAME }}
                     
                     # Создаем файл лога с именем тега для продакшн деплоя
-                    LOG_FILE="/var/log/deployments/production/${{ env.RELEASE_VERSION }}-prod.log"
+                    LOG_FILE="/var/log/deployments/production/${{ env.SERVICE_NAME }}/${{ env.RELEASE_VERSION }}-prod.log"
                     
                     # Функция для логирования
                     log_message() {
