@@ -103,77 +103,84 @@ jobs:
                       exit 1
                     fi
                     
-                    echo "✅ Статус обновлен на 'production_deployment'"
+                    echo "✅ Статус обновлен на 'deploying'"
 
             -   name: Deploy to production server
                 id: deploy_step
                 run: |
-                    # Функция для обновления статуса с ошибкой
-                    update_failed_status() {
-                        curl -s -X PATCH \
-                          -H "Content-Type: application/json" \
-                          -d '{
-                            "release_id": ${{ env.RELEASE_ID }},
-                            "status": "failed"
-                          }' \
-                          "${{ env.LOOM_RELEASE_TG_BOT_API_URL }}/release"
-                    }
-                    
-                    # Используем sshpass для аутентификации по паролю
                     SSH_OUTPUT=$(sshpass -p "${{ env.SERVER_PASSWORD }}" ssh -o StrictHostKeyChecking=no root@${{ env.SERVER_HOST }} -p 22 << 'EOF' 2>&1
                     set -e
                     
+                    # Создаем директорию для логов если её нет
+                    mkdir -p /var/log/deployments/production
+                    
+                    # Создаем файл лога с именем тега для продакшн деплоя
+                    LOG_FILE="/var/log/deployments/production/${{ env.RELEASE_VERSION }}-prod.log"
+                    
+                    # Функция для логирования
+                    log_message() {
+                        local message="$1"
+                        echo "$(date '+%Y-%m-%d %H:%M:%S') - $message" | tee -a "$LOG_FILE"
+                    }
+                    
+                    log_message "🚀 Начинаем продакшн деплой тега ${{ env.RELEASE_VERSION }}"
+                    log_message "🔗 Release ID: ${{ env.RELEASE_ID }}"
+                    
                     cd loom/${{ env.SERVICE_NAME }}
-                    git fetch origin --tags
+                    
+                    log_message "📥 Обновляем теги из репозитория"
+                    git fetch origin --tags 2>&1 | tee -a "$LOG_FILE"
                     
                     # Сохраняем текущую ветку/тег для проверки
                     CURRENT_REF=$(git symbolic-ref --short HEAD 2>/dev/null || git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD)
-                    echo "🔍 Текущее состояние: $CURRENT_REF"
+                    log_message "🔍 Текущее состояние: $CURRENT_REF"
                     
                     # Проверяем, существует ли тег
                     if ! git tag -l | grep -q "^${{ env.RELEASE_VERSION }}$"; then
-                        echo "❌ Тег ${{ env.RELEASE_VERSION }} не найден в репозитории!"
+                        log_message "❌ Тег ${{ env.RELEASE_VERSION }} не найден в репозитории!"
                         exit 1
                     fi
                     
                     # Создаем бэкап текущего состояния
                     BACKUP_REF="backup-before-${{ env.RELEASE_VERSION }}-$(date +%Y%m%d-%H%M%S)"
-                    git tag "$BACKUP_REF" HEAD
-                    echo "💾 Создан бэкап: $BACKUP_REF"
+                    git tag "$BACKUP_REF" HEAD 2>&1 | tee -a "$LOG_FILE"
+                    log_message "💾 Создан бэкап: $BACKUP_REF"
                     
                     # Переключаемся на тег
-                    echo "🏷️ Переключаемся на тег ${{ env.RELEASE_VERSION }}"
-                    git checkout ${{ env.RELEASE_VERSION }}
+                    log_message "🏷️ Переключаемся на тег ${{ env.RELEASE_VERSION }}"
+                    git checkout ${{ env.RELEASE_VERSION }} 2>&1 | tee -a "$LOG_FILE"
                     
                     # Очищаем старые ветки (кроме main/master)
-                    echo "🧹 Очищаем старые ветки"
-                    git for-each-ref --format='%(refname:short)' refs/heads | grep -v -E "^(main|master)$" | xargs -r git branch -D
+                    log_message "🧹 Очищаем старые ветки"
+                    git for-each-ref --format='%(refname:short)' refs/heads | grep -v -E "^(main|master)$" | xargs -r git branch -D 2>&1 | tee -a "$LOG_FILE"
                     
                     # Очищаем удаленные ветки
-                    git remote prune origin
+                    log_message "🧹 Очищаем удаленные ветки"
+                    git remote prune origin 2>&1 | tee -a "$LOG_FILE"
                     
-                    echo "✅ Переключение на тег ${{ env.RELEASE_VERSION }} завершено"
+                    log_message "✅ Переключение на тег ${{ env.RELEASE_VERSION }} завершено"
                     
                     cd ../loom-system
                     
                     export $(cat env/.env.app env/.env.db env/.env.monitoring | xargs)
                     
-                    echo "🔨 Начинаем сборку контейнера для тега ${{ env.RELEASE_VERSION }} на ПРОДАКШН..."
+                    log_message "🔨 Начинаем сборку контейнера для тега ${{ env.RELEASE_VERSION }} на ПРОДАКШН..."
                     
                     # Останавливаем старый контейнер
-                    echo "⏹️ Останавливаем старый контейнер..."
-                    docker compose -f ./docker-compose/app.yaml stop ${{ env.SERVICE_NAME }} || true
+                    log_message "⏹️ Останавливаем старый контейнер..."
+                    docker compose -f ./docker-compose/app.yaml stop ${{ env.SERVICE_NAME }} 2>&1 | tee -a "$LOG_FILE" || true
                     
                     # Создаем бэкап образа
                     OLD_IMAGE=$(docker images --format "table {{.Repository}}:{{.Tag}}" | grep ${{ env.SERVICE_NAME }} | head -1 | tr -s ' ')
                     if [ ! -z "$OLD_IMAGE" ]; then
                         BACKUP_IMAGE="${{ env.SERVICE_NAME }}:backup-$(date +%Y%m%d-%H%M%S)"
-                        docker tag "$OLD_IMAGE" "$BACKUP_IMAGE"
-                        echo "💾 Создан бэкап образа: $BACKUP_IMAGE"
+                        docker tag "$OLD_IMAGE" "$BACKUP_IMAGE" 2>&1 | tee -a "$LOG_FILE"
+                        log_message "💾 Создан бэкап образа: $BACKUP_IMAGE"
                     fi
                     
                     # Собираем и запускаем новый контейнер
-                    docker compose -f ./docker-compose/app.yaml up -d --build ${{ env.SERVICE_NAME }}
+                    log_message "🔧 Собираем и запускаем новый контейнер..."
+                    docker compose -f ./docker-compose/app.yaml up -d --build ${{ env.SERVICE_NAME }} 2>&1 | tee -a "$LOG_FILE"
                     
                     check_health() {
                         # Если есть HTTP endpoint
@@ -188,18 +195,18 @@ jobs:
                     ATTEMPT=1
                     SUCCESS=false
                     
-                    echo "⏳ Ждем запуска сервиса..."
+                    log_message "⏳ Ждем запуска сервиса на продакшн..."
                     sleep 15
                     
                     while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
-                        echo "🔍 Проверка health (попытка $ATTEMPT из $MAX_ATTEMPTS)..."
+                        log_message "🔍 Проверка health на продакшн (попытка $ATTEMPT из $MAX_ATTEMPTS)..."
                     
                         if check_health; then
-                            echo "✅ Health check пройден!"
+                            log_message "✅ Health check на продакшн пройден!"
                             SUCCESS=true
                             break
                         else
-                            echo "⏳ Health check не пройден, ждем..."
+                            log_message "⏳ Health check не пройден, ждем..."
                             sleep 20
                         fi
                     
@@ -207,13 +214,18 @@ jobs:
                     done
                     
                     if [ "$SUCCESS" = false ]; then
-                        echo "❌ Health check не пройден после $MAX_ATTEMPTS попыток"
-                        echo "📋 Логи контейнера:"
-                        docker logs --tail 100 ${{ env.SERVICE_NAME }}
+                        log_message "❌ Health check не пройден после $MAX_ATTEMPTS попыток"
+                        log_message "📋 Логи контейнера:"
+                        docker logs --tail 100 ${{ env.SERVICE_NAME }} 2>&1 | tee -a "$LOG_FILE"
                         exit 1
                     fi
                     
-                    echo "🎉 Тег ${{ env.RELEASE_VERSION }} успешно развернут на ПРОДАКШН и приложение работает!"
+                    log_message "🎉 Тег ${{ env.RELEASE_VERSION }} успешно развернут на ПРОДАКШН и приложение работает!"
+                    log_message "📁 Лог продакшн деплоя сохранен в: $LOG_FILE"
+                    
+                    # Выводим последние строки лога для GitHub Actions
+                    echo "📋 Последние строки лога продакшн деплоя:"
+                    tail -20 "$LOG_FILE"
                     EOF
                     )
                     
@@ -222,11 +234,22 @@ jobs:
                     if [ $SSH_EXIT_CODE -ne 0 ]; then
                         echo "❌ Ошибка при деплое на продакшн сервер:"
                         echo "$SSH_OUTPUT"
-                        update_failed_status
                         exit 1
                     fi
                     
                     echo "✅ Деплой на продакшн завершен успешно"
+
+            -   name: Update status on failure
+                if: failure()
+                run: |
+                    curl -s -X PATCH \
+                      -H "Content-Type: application/json" \
+                      -d '{
+                        "release_id": ${{ env.RELEASE_ID }},
+                        "status": "failed"
+                      }' \
+                      "${{ env.LOOM_RELEASE_TG_BOT_API_URL }}/release"
+                    echo "✅ Статус обновлен на 'failed'"
 
             -   name: Update status to production success
                 if: success()
@@ -238,7 +261,7 @@ jobs:
                         "status": "deployed"
                       }' \
                       "${{ env.LOOM_RELEASE_TG_BOT_API_URL }}/release"
-                    echo "✅ Статус обновлен на 'production_success'"
+                    echo "✅ Статус обновлен на 'deployed'"
 
             -   name: Verify production deployment
                 if: success()
@@ -248,3 +271,4 @@ jobs:
                     echo "🏷️ Версия: ${{ env.RELEASE_VERSION }}"
                     echo "✅ Статус: Успешно развернуто на продакшн"
                     echo "🔗 Release ID: ${{ env.RELEASE_ID }}"
+                    echo "📁 Лог продакшн деплоя: /var/log/deployments/production/${{ env.RELEASE_VERSION }}-prod.log"

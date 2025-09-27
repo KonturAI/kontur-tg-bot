@@ -219,7 +219,7 @@ jobs:
                     echo "✅ Деплой завершен успешно"
 
             - name: Update status on failure
-              if: failure() && steps.deploy_step.outcome == 'failure'
+              if: failure()
               run: |
                 curl -s -X PATCH \
                   -H "Content-Type: application/json" \
