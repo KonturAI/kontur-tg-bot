@@ -3,7 +3,7 @@ name: Deploy tag to production server
 on:
     workflow_dispatch:
         inputs:
-            tag_name:
+            release_version:
                 description: 'Tag to deploy (e.g., v1.0.0)'
                 required: true
                 type: string
@@ -22,8 +22,8 @@ jobs:
         steps:
             -   name: Validate inputs
                 run: |
-                    if [[ ! "${{ github.event.inputs.tag_name }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
-                      echo "❌ Неверный формат тега: ${{ github.event.inputs.tag_name }}"
+                    if [[ ! "${{ github.event.inputs.release_version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
+                      echo "❌ Неверный формат тега: ${{ github.event.inputs.release_version }}"
                       echo "   Ожидается формат: v1.0.0"
                       exit 1
                     fi
@@ -34,10 +34,10 @@ jobs:
                       exit 1
                     fi
                     
-                    echo "TAG_NAME=${{ github.event.inputs.tag_name }}" >> $GITHUB_ENV
+                    echo "RELEASE_VERSION=${{ github.event.inputs.release_version }}" >> $GITHUB_ENV
                     echo "RELEASE_ID=${{ github.event.inputs.release_id }}" >> $GITHUB_ENV
                     echo "✅ Входные параметры валидны"
-                    echo "✅ Тег: ${{ github.event.inputs.tag_name }}"
+                    echo "✅ Тег: ${{ github.event.inputs.release_version }}"
                     echo "✅ Release ID: ${{ github.event.inputs.release_id }}"
 
             -   name: Load server configuration
@@ -131,19 +131,19 @@ jobs:
                     echo "🔍 Текущее состояние: $CURRENT_REF"
                     
                     # Проверяем, существует ли тег
-                    if ! git tag -l | grep -q "^${{ env.TAG_NAME }}$"; then
-                        echo "❌ Тег ${{ env.TAG_NAME }} не найден в репозитории!"
+                    if ! git tag -l | grep -q "^${{ env.RELEASE_VERSION }}$"; then
+                        echo "❌ Тег ${{ env.RELEASE_VERSION }} не найден в репозитории!"
                         exit 1
                     fi
                     
                     # Создаем бэкап текущего состояния
-                    BACKUP_REF="backup-before-${{ env.TAG_NAME }}-$(date +%Y%m%d-%H%M%S)"
+                    BACKUP_REF="backup-before-${{ env.RELEASE_VERSION }}-$(date +%Y%m%d-%H%M%S)"
                     git tag "$BACKUP_REF" HEAD
                     echo "💾 Создан бэкап: $BACKUP_REF"
                     
                     # Переключаемся на тег
-                    echo "🏷️ Переключаемся на тег ${{ env.TAG_NAME }}"
-                    git checkout ${{ env.TAG_NAME }}
+                    echo "🏷️ Переключаемся на тег ${{ env.RELEASE_VERSION }}"
+                    git checkout ${{ env.RELEASE_VERSION }}
                     
                     # Очищаем старые ветки (кроме main/master)
                     echo "🧹 Очищаем старые ветки"
@@ -152,13 +152,13 @@ jobs:
                     # Очищаем удаленные ветки
                     git remote prune origin
                     
-                    echo "✅ Переключение на тег ${{ env.TAG_NAME }} завершено"
+                    echo "✅ Переключение на тег ${{ env.RELEASE_VERSION }} завершено"
                     
                     cd ../loom-system
                     
                     export $(cat env/.env.app env/.env.db env/.env.monitoring | xargs)
                     
-                    echo "🔨 Начинаем сборку контейнера для тега ${{ env.TAG_NAME }} на ПРОДАКШН..."
+                    echo "🔨 Начинаем сборку контейнера для тега ${{ env.RELEASE_VERSION }} на ПРОДАКШН..."
                     
                     # Останавливаем старый контейнер
                     echo "⏹️ Останавливаем старый контейнер..."
@@ -213,7 +213,7 @@ jobs:
                         exit 1
                     fi
                     
-                    echo "🎉 Тег ${{ env.TAG_NAME }} успешно развернут на ПРОДАКШН и приложение работает!"
+                    echo "🎉 Тег ${{ env.RELEASE_VERSION }} успешно развернут на ПРОДАКШН и приложение работает!"
                     EOF
                     )
                     
@@ -245,6 +245,6 @@ jobs:
                 run: |
                     echo "🎉🎉🎉 ПРОДАКШН ДЕПЛОЙ ЗАВЕРШЕН УСПЕШНО 🎉🎉🎉"
                     echo "📊 Сервер: ${{ env.SERVER_HOST }}"
-                    echo "🏷️ Версия: ${{ env.TAG_NAME }}"
+                    echo "🏷️ Версия: ${{ env.RELEASE_VERSION }}"
                     echo "✅ Статус: Успешно развернуто на продакшн"
                     echo "🔗 Release ID: ${{ env.RELEASE_ID }}"
