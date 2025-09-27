@@ -68,7 +68,6 @@ jobs:
                     # Создаем запись о релизе в базе данных
                     RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
                           -H "Content-Type: application/json" \
-                          -H "Authorization: Bearer ${{ env.LOOM_INTERSERVER_SECRET_KEY }}" \
                           -d '{
                             "service_name": "${{ env.SERVICE_NAME }}",
                             "release_version": "${{ env.TAG_NAME }}",
