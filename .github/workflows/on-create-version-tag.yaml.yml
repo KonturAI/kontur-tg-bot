@@ -214,7 +214,7 @@ jobs:
                     ccurl -s -X PATCH \
                       -H "Content-Type: application/json" \
                       -d '{
-                        "status": "failed",
+                        "status": "manual_testing",
                         "interserver_secret_key": "${{ env.LOOM_INTERSERVER_SECRET_KEY }}",
                       }' \
                       "${{ env.LOOM_RELEASE_TG_BOT_API_URL }}/release"
