@@ -175,15 +175,6 @@ jobs:
                     
                     log_message "🔨 Начинаем сборку контейнера для тега ${{ env.RELEASE_VERSION }} на ПРОДАКШН..."
                     
-                    # Создаем бэкап образа
-                    OLD_IMAGE=$(docker images --format "table {{.Repository}}:{{.Tag}}" | grep ${{ env.SERVICE_NAME }} | head -1 | tr -s ' ')
-                    if [ ! -z "$OLD_IMAGE" ]; then
-                        BACKUP_IMAGE="${{ env.SERVICE_NAME }}:backup-$(date +%Y%m%d-%H%M%S)"
-                        docker tag "$OLD_IMAGE" "$BACKUP_IMAGE" 2>&1 | tee -a "$LOG_FILE"
-                        log_message "💾 Создан бэкап образа: $BACKUP_IMAGE"
-                    fi
-                    
-                    # Собираем и запускаем новый контейнер
                     log_message "🔧 Собираем и запускаем новый контейнер..."
                     docker compose -f ./docker-compose/app.yaml up -d --build ${{ env.SERVICE_NAME }} 2>&1 | tee -a "$LOG_FILE"
                     
