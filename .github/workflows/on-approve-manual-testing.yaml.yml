@@ -175,10 +175,6 @@ jobs:
                     
                     log_message "🔨 Начинаем сборку контейнера для тега ${{ env.RELEASE_VERSION }} на ПРОДАКШН..."
                     
-                    # Останавливаем старый контейнер
-                    log_message "⏹️ Останавливаем старый контейнер..."
-                    docker compose -f ./docker-compose/app.yaml stop ${{ env.SERVICE_NAME }} 2>&1 | tee -a "$LOG_FILE" || true
-                    
                     # Создаем бэкап образа
                     OLD_IMAGE=$(docker images --format "table {{.Repository}}:{{.Tag}}" | grep ${{ env.SERVICE_NAME }} | head -1 | tr -s ' ')
                     if [ ! -z "$OLD_IMAGE" ]; then
