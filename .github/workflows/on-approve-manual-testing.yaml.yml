@@ -154,15 +154,10 @@ jobs:
                     fi
                     
                     log_message "✅ Тег ${{ env.TAG_NAME }} найден и готов к использованию"
-                    
-                    # Создаем бэкап текущего состояния
-                    BACKUP_REF="backup-before-${{ env.RELEASE_VERSION }}-$(date +%Y%m%d-%H%M%S)"
-                    git tag "$BACKUP_REF" HEAD 2>&1 | tee -a "$LOG_FILE"
-                    log_message "💾 Создан бэкап: $BACKUP_REF"
-                    
+
                     # Переключаемся на тег
-                    log_message "🏷️ Переключаемся на тег ${{ env.RELEASE_VERSION }}"
-                    git checkout ${{ env.RELEASE_VERSION }} 2>&1 | tee -a "$LOG_FILE"
+                    log_message "🏷️ Переключаемся на тег ${{ env.TAG_NAME }}"
+                    git checkout ${{ env.TAG_NAME }} 2>&1 | tee -a "$LOG_FILE"
                     
                     # Очищаем старые ветки (кроме main/master)
                     log_message "🧹 Очищаем старые ветки"
