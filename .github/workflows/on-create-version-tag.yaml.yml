@@ -208,7 +208,7 @@ jobs:
             -   name: Update status to manual testing
                 if: success()
                 run: |
-                    ccurl -s -X PATCH \
+                    curl -s -X PATCH \
                       -H "Content-Type: application/json" \
                       -d '{
                         "status": "manual_testing"
