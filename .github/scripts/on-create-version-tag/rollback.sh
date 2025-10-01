@@ -106,9 +106,8 @@ rollback_migrations() {
         --env-file ../$SYSTEM_REPO/env/.env.app \
         --env-file ../$SYSTEM_REPO/env/.env.db \
         --env-file ../$SYSTEM_REPO/env/.env.monitoring \
-        python:3.11-slim \
+        migration-base:latest \
         bash -c '
-            pip install -q -r .github/requirements.txt
             python internal/migration/run.py stage --command down --version $PREVIOUS_TAG
         ' > "$migration_output" 2>&1
 
@@ -192,8 +191,8 @@ check_health() {
 wait_for_health_after_rollback() {
     echo ""
     log INFO "Проверка работоспособности после отката"
-    log INFO "Ожидание 10 секунд перед проверкой..."
-    sleep 10
+    log INFO "Ожидание 15 секунд перед проверкой..."
+    sleep 15
 
     local max_attempts=5
     local attempt=1
@@ -258,9 +257,8 @@ restore_to_original() {
         --env-file ../$SYSTEM_REPO/env/.env.app \
         --env-file ../$SYSTEM_REPO/env/.env.db \
         --env-file ../$SYSTEM_REPO/env/.env.monitoring \
-        python:3.11-slim \
+        migration-base:latest \
         bash -c '
-            pip install -q -r .github/requirements.txt
             python internal/migration/run.py stage
         ' > "$migration_output" 2>&1
 
