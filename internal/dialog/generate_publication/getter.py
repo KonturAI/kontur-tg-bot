@@ -204,7 +204,6 @@ class GeneratePublicationDataGetter(interface.IGeneratePublicationGetter):
                     categories_data.append({
                         "id": category.id,
                         "name": category.name,
-                        "text_style": category.prompt_for_text_style,
                         "image_style": category.prompt_for_image_style,
                     })
 

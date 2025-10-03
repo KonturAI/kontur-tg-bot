@@ -52,9 +52,41 @@ class Category:
     organization_id: int
 
     name: str
-
     prompt_for_image_style: str
-    prompt_for_text_style: str
+
+    goal: str
+
+    # Структура контента
+    structure_skeleton: list[str]
+    structure_flex_level_min: int
+    structure_flex_level_max: int
+    structure_flex_level_comment: str
+
+    # Требования к контенту
+    must_have: list[str]
+    must_avoid: list[str]
+
+    # Правила для соцсетей
+    social_networks_rules: str
+
+    # Ограничения по длине
+    len_min: int
+    len_max: int
+
+    # Ограничения по хештегам
+    n_hashtags_min: int
+    n_hashtags_max: int
+
+    # Стиль и тон
+    cta_type: str
+    tone_of_voice: list[str]
+
+    # Бренд и примеры
+    brand_rules: list[str]
+    good_samples: list[dict]
+
+    # Дополнительная информация
+    additional_info: list[str]
 
     created_at: str
 
