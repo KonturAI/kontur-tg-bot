@@ -1,8 +1,9 @@
-from aiogram_dialog import Window, Dialog
+from aiogram_dialog import Window, Dialog, ShowMode
 from aiogram_dialog.widgets.text import Const, Format, Multi, Case
 from aiogram_dialog.widgets.kbd import Button, Column, Row, Back, ScrollingGroup, Select, NumberedPager, Checkbox
 from aiogram_dialog.widgets.input import TextInput, MessageInput
 from aiogram_dialog.widgets.media import DynamicMedia
+from sulguk import SULGUK_PARSE_MODE
 
 from internal import interface, model
 
@@ -20,11 +21,19 @@ class PublicationDraftDialog(interface.IPublicationDraftDialog):
         self.publication_draft_service = publication_draft_service
         self.publication_draft_getter = publication_draft_getter
 
+    async def _show_edit_menu(self, dialog_manager, callback, button):
+        """🔥 Показывает инлайн меню редактирования как в модерации"""
+        from aiogram_dialog.widgets.kbd import Multiselect
+        from aiogram_dialog.widgets.text import ScrollingTextWidget
+        from aiogram_dialog.widgets.input import ManagedTextInput
+        
+        # Вызываем обработчик из сервиса для показа меню
+        await self.publication_draft_service.handle_edit_menu_callback(callback, button, dialog_manager)
+
     def get_dialog(self) -> Dialog:
         return Dialog(
             self.get_publication_list_window(),
             self.get_edit_preview_window(),
-            self.get_edit_text_menu_window(),
             self.get_regenerate_text_window(),
             self.get_edit_title_window(),
             self.get_edit_description_window(),
@@ -40,6 +49,7 @@ class PublicationDraftDialog(interface.IPublicationDraftDialog):
         """
         🏠 ГЛАВНОЕ ОКНО - Список черновиков публикаций
         Этот виджет отображает все сохраненные черновики в виде скролльного списка
+        Показывает превью сразу после выбора публикации (как в модерации)
         """
         return Window(
             Multi(
@@ -89,49 +99,43 @@ class PublicationDraftDialog(interface.IPublicationDraftDialog):
 
             state=model.PublicationDraftStates.publication_list,
             getter=self.publication_draft_getter.get_publication_list_data,
-            parse_mode="HTML",
+            parse_mode=SULGUK_PARSE_MODE,
         )
 
     def get_edit_preview_window(self) -> Window:
         """
-        👁️ ОКНО ПРЕВЬЮ - Отображение черновика + кнопки действий
-        Показывает содержимое выбранного черновика и основные действия
+        📱 ПРЕВЬЮ ЧЕРНОВИКА - Точно как в модерации (копия)
+        Показывает превью черновика с кнопками редактирования прямо здесь
         """
         return Window(
             Multi(
-                Const("📄 <b>Редактирование черновика</b>\n\n"),
-                Format("🏷 Рубрика: <b>{category_name}</b>\n"),
-                Const("━━━━━━━━━━━━━━━━━━━━\n"),
-                Format("<b>{publication_title}</b>\n\n"),  # Название публикации
-                Format("{publication_content}\n\n"),       # Основной текст
+                Const("✏️ <b>Редактирование публикации</b><br><br>"),
+                Format("{publication_text}<br><br>"),
+                Format("👤 <b>Автор:</b> {creator_name}<br>"),
+                Format("🏷️ <b>Рубрика:</b> {category_name}<br>"),
+                Format("📅 <b>Создано:</b> <code>{created_at}</code><br>"),
                 Case(
                     {
-                        True: Format("🏷 Теги: {publication_tags}"),
+                        True: Format("<br>🖼️ <b>Изображение {current_image_index} из {total_images}</b>"),
                         False: Const(""),
                     },
-                    selector="has_tags"
+                    selector="has_multiple_images"
                 ),
                 Case(
                     {
-                        True: Format("\n🖼 Изображение: есть"),
-                        False: Const("\n🖼 Изображение: нет"),
+                        True: Const("<br><br>⚠️ <b><i>Есть несохраненные изменения!</i></b>"),
+                        False: Const(""),
                     },
-                    selector="has_image"
+                    selector="has_changes"
                 ),
-                Const("\n━━━━━━━━━━━━━━━━━━━━"),
+                Const("<br><br>📌 <b>Что будем изменять?</b>"),
                 sep="",
             ),
 
-            # 🖼️ ИЗОБРАЖЕНИЕ (если есть)
-            DynamicMedia(
-                selector="preview_image_media",
-                when="has_image",
-            ),
-
-            # 🎮 НАВИГАЦИЯ по черновикам (стрелки влево/вправо)
+            # Навигация между черновиками (если есть несколько)
             Row(
                 Button(
-                    Const("⬅️"),
+                    Const("⬅️ Пред черновик"),
                     id="prev_publication",
                     on_click=self.publication_draft_service.handle_navigate_publication,
                     when="has_prev",
@@ -139,54 +143,76 @@ class PublicationDraftDialog(interface.IPublicationDraftDialog):
                 Button(
                     Format("📍 {current_index}/{total_count}"),
                     id="current_position",
-                    on_click=None,  # Просто информационная кнопка
+                    on_click=None,
                 ),
                 Button(
-                    Const("➡️"),
-                    id="next_publication", 
+                    Const("➡️ След черновик"),
+                    id="next_publication",
                     on_click=self.publication_draft_service.handle_navigate_publication,
                     when="has_next",
                 ),
+                when="has_multiple_drafts",
             ),
 
-            # 🛠️ ОСНОВНЫЕ ДЕЙСТВИЯ С ЧЕРНОВИКОМ
-            Column(
-                Row(
-                    Button(
-                        Const("✏️ Редактировать"),
-                        id="edit_text_menu",
-                        on_click=lambda c, b, d: d.switch_to(model.PublicationDraftStates.edit_text_menu),
-                    ),
-                    Button(
-                        Const("🗑 Удалить"),
-                        id="delete_publication",
-                        on_click=self.publication_draft_service.handle_delete_publication,
-                    ),
+            DynamicMedia(
+                selector="preview_image_media",
+                when="has_image",
+            ),
+
+            Row(
+                Button(
+                    Const("⬅️ Пред изображение"),
+                    id="prev_image",
+                    on_click=self.publication_draft_service.handle_prev_image,
+                    when="has_multiple_images",
                 ),
                 Button(
-                    Const("📤 Отправить на модерацию"),
-                    id="send_to_moderation",
-                    on_click=self.publication_draft_service.handle_send_to_moderation_with_networks_publication,
-                    when="requires_moderation",
+                    Const("➡️ След изображение"),
+                    id="next_image",
+                    on_click=self.publication_draft_service.handle_next_image,
+                    when="has_multiple_images",
+                ),
+                when="has_multiple_images",
+            ),
+
+            # Основные действия (точно как в модерации)
+            Row(
+                Button(
+                    Const("✏️ Редактировать"),
+                    id="edit",
+                    on_click=lambda c, b, d: self._show_edit_menu(dialog_manager=d, callback=c, button=b),
+                ),
+                Button(
+                    Const("🗑 Удалить"),
+                    id="delete",
+                    on_click=self.publication_draft_service.handle_delete_publication,
+                ),
+            ),
+
+            Row(
+                Button(
+                    Const("🌐 Выбрать платформы"),
+                    id="select_social_network",
+                    on_click=lambda c, b, d: d.switch_to(model.PublicationDraftStates.social_network_select, ShowMode.EDIT),
                 ),
                 Button(
                     Const("🚀 Опубликовать сейчас"),
                     id="publish_now",
                     on_click=self.publication_draft_service.handle_publish_with_selected_networks_publication,
-                    when="can_publish_directly",
                 ),
             ),
 
-            # ◀️ НАЗАД к списку черновиков
-            Button(
-                Const("◀️ К списку черновиков"),
-                id="back_to_list",
-                on_click=self.publication_draft_service.handle_back_to_publication_list,
+            Row(
+                Button(
+                    Const("◀️ Меню контента"),
+                    id="back_to_content_menu",
+                    on_click=self.publication_draft_service.handle_back_to_content_menu,
+                ),
             ),
 
             state=model.PublicationDraftStates.edit_preview,
             getter=self.publication_draft_getter.get_edit_preview_data,
-            parse_mode="HTML",
+            parse_mode=SULGUK_PARSE_MODE,
         )
 
     def get_edit_text_menu_window(self) -> Window:
@@ -241,7 +267,7 @@ class PublicationDraftDialog(interface.IPublicationDraftDialog):
 
             state=model.PublicationDraftStates.edit_text_menu,
             getter=self.publication_draft_getter.get_edit_text_menu_data,
-            parse_mode="HTML",
+            parse_mode=SULGUK_PARSE_MODE,
         )
 
     def get_regenerate_text_window(self) -> Window:
@@ -296,7 +322,7 @@ class PublicationDraftDialog(interface.IPublicationDraftDialog):
 
             state=model.PublicationDraftStates.regenerate_text,
             getter=self.publication_draft_getter.get_regenerate_text_data,
-            parse_mode="HTML",
+            parse_mode=SULGUK_PARSE_MODE,
         )
 
     def get_edit_title_window(self) -> Window:
@@ -331,7 +357,7 @@ class PublicationDraftDialog(interface.IPublicationDraftDialog):
 
             state=model.PublicationDraftStates.edit_title,
             getter=self.publication_draft_getter.get_edit_title_data,
-            parse_mode="HTML",
+            parse_mode=SULGUK_PARSE_MODE,
         )
 
     def get_edit_description_window(self) -> Window:
@@ -359,7 +385,7 @@ class PublicationDraftDialog(interface.IPublicationDraftDialog):
 
             state=model.PublicationDraftStates.edit_description,
             getter=self.publication_draft_getter.get_edit_description_data,
-            parse_mode="HTML",
+            parse_mode=SULGUK_PARSE_MODE,
         )
 
     def get_edit_content_window(self) -> Window:
@@ -394,7 +420,7 @@ class PublicationDraftDialog(interface.IPublicationDraftDialog):
 
             state=model.PublicationDraftStates.edit_content,
             getter=self.publication_draft_getter.get_edit_content_data,
-            parse_mode="HTML",
+            parse_mode=SULGUK_PARSE_MODE,
         )
 
 
@@ -445,7 +471,7 @@ class PublicationDraftDialog(interface.IPublicationDraftDialog):
 
             state=model.PublicationDraftStates.edit_image_menu,
             getter=self.publication_draft_getter.get_edit_image_menu_data,
-            parse_mode="HTML",
+            parse_mode=SULGUK_PARSE_MODE,
         )
 
     def get_generate_image_window(self) -> Window:
@@ -480,7 +506,7 @@ class PublicationDraftDialog(interface.IPublicationDraftDialog):
 
             state=model.PublicationDraftStates.generate_image,
             getter=self.publication_draft_getter.get_generate_image_data,
-            parse_mode="HTML",
+            parse_mode=SULGUK_PARSE_MODE,
         )
 
     def get_upload_image_window(self) -> Window:
@@ -508,7 +534,7 @@ class PublicationDraftDialog(interface.IPublicationDraftDialog):
 
             state=model.PublicationDraftStates.upload_image,
             getter=self.publication_draft_getter.get_upload_image_data,
-            parse_mode="HTML",
+            parse_mode=SULGUK_PARSE_MODE,
         )
 
     def get_edit_tags_window(self) -> Window:
@@ -537,7 +563,7 @@ class PublicationDraftDialog(interface.IPublicationDraftDialog):
 
             state=model.PublicationDraftStates.edit_tags,
             getter=self.publication_draft_getter.get_edit_tags_data,
-            parse_mode="HTML",
+            parse_mode=SULGUK_PARSE_MODE,
         )
 
     def get_social_network_select_window(self) -> Window:
@@ -586,5 +612,5 @@ class PublicationDraftDialog(interface.IPublicationDraftDialog):
 
             state=model.PublicationDraftStates.social_network_select,
             getter=self.publication_draft_getter.get_social_network_select_data,
-            parse_mode="HTML",
+            parse_mode=SULGUK_PARSE_MODE,
         )

@@ -44,7 +44,7 @@ class PublicationDraftService(interface.IPublicationDraftService):
                 
                 self.logger.info(f"Выбрана публикация для редактирования: {publication_id}")
 
-                # 🔄 Переходим к превью выбранной публикации
+                # 🔄 Переходим к превью выбранной публикации (как в модерации)
                 await dialog_manager.switch_to(model.PublicationDraftStates.edit_preview)
 
                 span.set_status(Status(StatusCode.OK))
@@ -552,23 +552,70 @@ class PublicationDraftService(interface.IPublicationDraftService):
             button: Any,
             dialog_manager: DialogManager
     ) -> None:
-        """🚀 Публикация сейчас"""
-        try:
-            publication_id = int(dialog_manager.dialog_data.get("selected_publication_id"))
-            
-            # 🚀 Публикуем (минуя модерацию): подтверждаем как опубликовано текущим пользователем
-            state = await self._get_state(dialog_manager)
-            await self.loom_content_client.moderate_publication(
-                publication_id=publication_id,
-                moderator_id=state.account_id,
-                moderation_status="published",
-            )
-            
-            await callback.answer("🚀 Опубликовано!", show_alert=True)
-            await dialog_manager.start(model.ContentMenuStates.content_menu, mode=StartMode.RESET_STACK)
-        except Exception as err:
-            await callback.answer("❌ Ошибка публикации", show_alert=True)
-            raise
+        """🚀 Публикация сейчас (точно как в модерации)"""
+        with self.tracer.start_as_current_span(
+                "PublicationDraftService.handle_publish_with_selected_networks",
+                kind=SpanKind.INTERNAL
+        ) as span:
+            try:
+                # Проверяем, что выбрана хотя бы одна соцсеть
+                selected_networks = dialog_manager.dialog_data.get("selected_social_networks", {})
+                has_selected_networks = any(selected_networks.values())
+
+                if not has_selected_networks:
+                    await callback.answer(
+                        "⚠️ Выберите хотя бы одну социальную сеть для публикации",
+                        show_alert=True
+                    )
+                    return
+
+                if self._has_changes(dialog_manager):
+                    await self._save_publication_changes(dialog_manager)
+
+                original_pub = dialog_manager.dialog_data["original_publication"]
+                publication_id = original_pub["id"]
+                state = await self._get_state(dialog_manager)
+
+                # Получаем выбранные социальные сети
+                selected_networks = dialog_manager.dialog_data.get("selected_social_networks", {})
+                tg_source = selected_networks.get("telegram_checkbox", False)
+                vk_source = selected_networks.get("vkontakte_checkbox", False)
+
+                # Обновляем публикацию с выбранными соцсетями
+                await self.loom_content_client.change_publication(
+                    publication_id=publication_id,
+                    tg_source=tg_source,
+                    vk_source=vk_source,
+                )
+
+                # Одобряем публикацию
+                await self.loom_content_client.moderate_publication(
+                    publication_id=publication_id,
+                    moderator_id=state.account_id,
+                    moderation_status="approved",
+                )
+
+                post_links = await self.loom_content_client.moderate_publication(
+                    publication_id,
+                    state.account_id,
+                    "approved"
+                )
+
+                dialog_manager.dialog_data["post_links"] = post_links
+
+                self.logger.info("Черновик опубликован")
+                await self._remove_current_publication_from_list(dialog_manager)
+                await callback.answer("🎉 Опубликовано!", show_alert=True)
+
+                await dialog_manager.start(model.ContentMenuStates.content_menu, mode=StartMode.RESET_STACK)
+                span.set_status(Status(StatusCode.OK))
+
+            except Exception as err:
+                span.record_exception(err)
+                span.set_status(Status(StatusCode.ERROR, str(err)))
+
+                await callback.answer("❌ Ошибка при публикации", show_alert=True)
+                raise
 
     # 🔙 НАВИГАЦИЯ
     
@@ -601,8 +648,228 @@ class PublicationDraftService(interface.IPublicationDraftService):
             await callback.answer("❌ Ошибка навигации", show_alert=True)
             raise
 
+    async def handle_edit_menu_callback(
+            self,
+            callback: CallbackQuery,
+            button: Any,
+            dialog_manager: DialogManager
+    ) -> None:
+        """🔥 Обработчик для инлайн меню редактирования (как в модерации)"""
+        try:
+            # Отправляем инлайн клавиатуру с опциями редактирования
+            await self.bot.send_message(
+                chat_id=callback.from_user.id,
+                text="✏️ <b>Выберите действие для редактирования:</b>",
+                reply_markup=self._create_edit_menu_keyboard(callback, dialog_manager),
+                parse_mode="HTML"
+            )
+            await callback.answer()
+        except Exception as err:
+            await callback.answer("❌ Ошибка", show_alert=True)
+            self.logger.error(f"Ошибка в меню редактирования: {err}")
+            raise
+
+    def _create_edit_menu_keyboard(self, callback, dialog_manager):
+        """📱 Создает инлайн клавиатуру для меню редактирования"""
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="📝 Изменить текст",
+                        callback_data=f"edit_text_{callback.message.message_id}"
+                    ),
+                    InlineKeyboardButton(
+                        text="🖼 Изменить изображение",
+                        callback_data=f"edit_image_{callback.message.message_id}"
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="🔄 Перегенерировать",
+                        callback_data=f"regenerate_{callback.message.message_id}"
+                    ),
+                ],
+
+                [
+                    InlineKeyboardButton(
+                        text="◀️ Назад к превью",
+                        callback_data=f"back_preview_{callback.message.message_id}"
+                    ),
+                ],
+            ]
+        )
+
+    async def handle_prev_image(
+            self,
+            callback: CallbackQuery,
+            button: Any,
+            dialog_manager: DialogManager
+    ) -> None:
+        """🖼️ Предыдущее изображение (копия из модерации)"""
+        with self.tracer.start_as_current_span(
+                "PublicationDraftService.handle_prev_image",
+                kind=SpanKind.INTERNAL
+        ) as span:
+            try:
+                working_pub = dialog_manager.dialog_data.get("working_publication", {})
+                images_url = working_pub.get("generated_images_url", [])
+                current_index = working_pub.get("current_image_index", 0)
+
+                if current_index > 0:
+                    dialog_manager.dialog_data["working_publication"]["current_image_index"] = current_index - 1
+                else:
+                    dialog_manager.dialog_data["working_publication"]["current_image_index"] = len(images_url) - 1
+
+                await callback.answer()
+                span.set_status(Status(StatusCode.OK))
+
+            except Exception as err:
+                span.record_exception(err)
+                span.set_status(Status(StatusCode.ERROR, str(err)))
+                raise
+
+    async def handle_next_image(
+            self,
+            callback: CallbackQuery,
+            button: Any,
+            dialog_manager: DialogManager
+    ) -> None:
+        """🖼️ Следующее изображение (копия из модерации)"""
+        with self.tracer.start_as_current_span(
+                "PublicationDraftService.handle_next_image",
+                kind=SpanKind.INTERNAL
+        ) as span:
+            try:
+                working_pub = dialog_manager.dialog_data.get("working_publication", {})
+                images_url = working_pub.get("generated_images_url", [])
+                current_index = working_pub.get("current_image_index", 0)
+
+                if current_index < len(images_url) - 1:
+                    dialog_manager.dialog_data["working_publication"]["current_image_index"] = current_index + 1
+                else:
+                    dialog_manager.dialog_data["working_publication"]["current_image_index"] = 0
+
+                await callback.answer()
+                span.set_status(Status(StatusCode.OK))
+
+            except Exception as err:
+                span.record_exception(err)
+                span.set_status(Status(StatusCode.ERROR, str(err)))
+                raise
+
     # 🛠️ ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
     
+    def _has_changes(self, dialog_manager: DialogManager) -> bool:
+        """🔍 Проверяет есть ли несохраненные изменения (копия из модерации)"""
+        original = dialog_manager.dialog_data.get("original_publication", {})
+        working = dialog_manager.dialog_data.get("working_publication", {})
+
+        if not original or not working:
+            return False
+
+        # Сравниваем текстовые поля
+        fields_to_compare = ["text"]
+        for field in fields_to_compare:
+            if original.get(field) != working.get(field):
+                return True
+
+        # Проверяем изменения изображения
+        if original.get("has_image", False) != working.get("has_image", False):
+            return True
+
+        # Проверяем изменение URL изображения
+        original_url = original.get("image_url", "")
+        working_url = working.get("image_url", "")
+
+        if working_url and original_url:
+            if original_url != working_url:
+                return True
+        elif working_url != original_url:
+            return True
+
+        return False
+
+    async def _save_publication_changes(self, dialog_manager: DialogManager) -> None:
+        """💾 Сохраняет изменения публикации (копия из модерации)"""
+        working_pub = dialog_manager.dialog_data["working_publication"]
+        original_pub = dialog_manager.dialog_data["original_publication"]
+        publication_id = working_pub["id"]
+
+        # Определяем, что делать с изображением
+        image_url = None
+        image_content = None
+        image_filename = None
+        should_delete_image = False
+
+        # Проверяем изменения изображения
+        original_has_image = original_pub.get("has_image", False)
+        working_has_image = working_pub.get("has_image", False)
+
+        if not working_has_image and original_has_image:
+            # Изображение было удалено
+            should_delete_image = True
+
+        elif working_has_image:
+            # Проверяем тип изображения и получаем выбранное
+            if working_pub.get("custom_image_file_id"):
+                # Пользовательское изображение
+                image_content = await self.bot.download(working_pub["custom_image_file_id"])
+                image_filename = working_pub["custom_image_file_id"] + ".jpg"
+
+            elif working_pub.get("generated_images_url"):
+                # Выбранное из множественных сгенерированных
+                images_url = working_pub["generated_images_url"]
+                current_index = working_pub.get("current_image_index", 0)
+
+                if current_index < len(images_url):
+                    selected_url = images_url[current_index]
+                    # Проверяем, изменилось ли изображение
+                    original_url = original_pub.get("image_url", "")
+                    if original_url != selected_url:
+                        image_url = selected_url
+
+            elif working_pub.get("image_url"):
+                # Одиночное изображение
+                original_url = original_pub.get("image_url", "")
+                working_url = working_pub.get("image_url", "")
+
+                if original_url != working_url:
+                    image_url = working_url
+
+        # Если нужно удалить изображение
+        if should_delete_image:
+            try:
+                await self.loom_content_client.delete_publication_image(
+                    publication_id=publication_id
+                )
+                self.logger.info(f"Deleted image for publication {publication_id}")
+            except Exception as e:
+                self.logger.warning(f"Failed to delete image: {str(e)}")
+
+        # Обновляем публикацию через API
+        if image_url or image_content:
+            await self.loom_content_client.change_publication(
+                publication_id=publication_id,
+                text=working_pub["text"],
+                image_url=image_url,
+                image_content=image_content,
+                image_filename=image_filename,
+            )
+        else:
+            # Обновляем только текстовые поля
+            await self.loom_content_client.change_publication(
+                publication_id=publication_id,
+                text=working_pub["text"],
+            )
+
+    async def _remove_current_publication_from_list(self, dialog_manager: DialogManager) -> None:
+        """🗑️ Удаляет текущий черновик из списка после публикации"""
+        # Для черновиков этого метода может не быть необходимости, 
+        # поскольку мы перенаправляем в контент-меню
+        pass
+
     async def _get_state(self, dialog_manager: DialogManager) -> model.UserState:
         """Получение состояния пользователя"""
         if hasattr(dialog_manager.event, 'message') and dialog_manager.event.message:

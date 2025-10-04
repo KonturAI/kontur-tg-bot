@@ -147,26 +147,58 @@ class PublicationDraftGetter(interface.IPublicationDraftGetter):
                         type=ContentType.PHOTO
                     )
 
+                # 📝 Подготавливаем данные как в модерации
+                working_pub = dialog_manager.dialog_data.get("working_publication", {})
+                original_pub = dialog_manager.dialog_data.get("original_publication", {})
+                
+                # Инициализируем рабочую версию если ее нет
+                if not working_pub:
+                    dialog_manager.dialog_data["working_publication"] = {
+                        "id": publication.id,
+                        "creator_id": publication.creator_id,
+                        "category_id": publication.category_id,
+                        "text": publication.text,
+                        "image_url": f"https://{self.loom_domain}/api/content/publication/{publication.id}/image/download" if has_image else None,
+                        "has_image": has_image,
+                        "current_image_index": 0,
+                        "user_image_file_id": None,
+                        "generated_images_url": [],
+                        "created_at": publication.created_at,
+                    }
+                    working_pub = dialog_manager.dialog_data["working_publication"]
+                
+                # Получаем данные об авторе
+                creator = await self.loom_employee_client.get_employee_by_account_id(publication.creator_id)
+                
                 data = {
-                    "publication_title": dialog_manager.dialog_data.get("publication_title", "Без названия"),
-                    "publication_content": self._clean_html_for_telegram(dialog_manager.dialog_data.get("publication_content", "")),
-                    "publication_tags": "Нет тегов",
+                    "creator_name": creator.name,
                     "category_name": category.name,
-                    "has_tags": False,
-                    "has_image": has_image,
+                    "created_at": self._format_datetime(publication.created_at),
+                    "publication_text": working_pub.get("text", publication.text),
+                    "has_image": working_pub.get("has_image", False),
+                    "preview_image_media": preview_image_media,
+                    "has_changes": self._has_changes(dialog_manager),
+                    "has_multiple_images": False,  # Для черновиков пока простое
+                    "current_image_index": 1,
+                    "total_images": 1,
                     
-                    # 🎮 Навигация
+                    # 🎮 Навигация между черновиками
                     "current_index": current_index,
                     "total_count": len(all_publication_ids),
                     "has_prev": current_index > 1,
                     "has_next": current_index < len(all_publication_ids),
+                    "has_multiple_drafts": len(all_publication_ids) > 1,
                     
-                    # 🔐 Права доступа
-                    "requires_moderation": employee.required_moderation if employee else True,
-                    "can_publish_directly": not employee.required_moderation if employee else False,
-                    
-                    # 🖼️ Изображение (если есть)
-                    "preview_image_media": preview_image_media,
+                    # Сохраняем исходные данные для сравнения с рабочей версией
+                    "original_publication": {
+                        "id": publication.id,
+                        "creator_id": publication.creator_id,
+                        "text": publication.text,
+                        "category_id": publication.category_id,
+                        "image_url": f"https://{self.loom_domain}/api/content/publication/{publication.id}/image/download" if has_image else None,
+                        "has_image": has_image,
+                        "created_at": publication.created_at,
+                    },
                 }
                 
                 span.set_status(Status(StatusCode.OK))
@@ -329,3 +361,45 @@ class PublicationDraftGetter(interface.IPublicationDraftGetter):
         text = text.strip()
         
         return text
+
+    def _has_changes(self, dialog_manager: DialogManager) -> bool:
+        """🔍 Проверяет есть ли несохраненные изменения (копия из модерации)"""
+        original = dialog_manager.dialog_data.get("original_publication", {})
+        working = dialog_manager.dialog_data.get("working_publication", {})
+
+        if not original or not working:
+            return False
+
+        # Сравниваем текстовые поля
+        fields_to_compare = ["text"]
+        for field in fields_to_compare:
+            if original.get(field) != working.get(field):
+                return True
+
+        # Проверяем изменения изображения
+        if original.get("has_image", False) != working.get("has_image", False):
+            return True
+
+        # Проверяем изменение URL изображения
+        original_url = original.get("image_url", "")
+        working_url = working.get("image_url", "")
+
+        if working_url and original_url:
+            if original_url != working_url:
+                return True
+        elif working_url != original_url:
+            return True
+
+        return False
+
+    def _format_datetime(self, dt: str) -> str:
+        """📅 Форматирует дату в читаемый вид (копия из модерации)"""
+        from datetime import datetime
+        try:
+            if isinstance(dt, str):
+                dt = datetime.fromisoformat(dt.replace('Z', '+00:00'))
+
+            # Форматируем в читаемый вид
+            return dt.strftime("%d.%m.%Y %H:%M")
+        except:
+            return str(dt) if dt else ""
